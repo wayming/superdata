@@ -1,0 +1,61 @@
+version: '3'
+services:
+  db:
+    image: postgres
+    container_name: db
+    environment:
+      POSTGRES_DB: dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /data/postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - superdata
+  adminer:
+    image: adminer
+    container_name: adminer
+    restart: always
+    environment:
+      ADMINER_DEFAULT_DB_DRIVER: pgsql
+      ADMINER_DEFAULT_DB_HOST: db
+      ADMINER_DEFAULT_DB_NAME: dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    networks:
+      - superdata
+  es:
+    image: elasticsearch:7.6.2
+    container_name: es
+    ports:
+      - "9200:9200"
+    networks:
+      - superdata
+  app:
+    container_name: app
+    build: .
+    command: ["go", "run", "main.go"]
+    volumes:
+      - .:/go/src/app
+    ports:
+      - "80:8080"
+    depends_on:
+      - db
+      - adminer
+      - es
+    links:
+      - db
+      - adminer
+      - es
+    networks:
+      - superdata
+
+networks:
+  superdata:
+    driver: bridge
+
+volumes:
+    postgres:
+    pgadmin:
