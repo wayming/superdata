@@ -19,3 +19,6 @@ WORKDIR /dist
 
 # Copy binary from build to main folder
 RUN cp /go/src/app/build/dbloader .
+
+# Copy datafiles to main folder
+RUN cp -r /go/src/app/datafiles .
