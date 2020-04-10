@@ -7,11 +7,13 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wayming/superdata/internal/db"
+	"github.com/wayming/superdata/internal/record"
 )
 
 // Loader db loader
@@ -19,6 +21,49 @@ type Loader struct {
 	TableName  string
 	DateFormat string
 	conn       *sql.DB
+	data       record.UnitRecords
+}
+
+func (loader *Loader) fillGap() {
+	sort.Sort(loader.data)
+
+	var nullRecords record.UnitRecords
+	for idx, curr := range loader.data {
+		if idx == loader.data.Len()-1 {
+			// last one
+			continue
+		}
+		nextRecord := loader.data[idx+1]
+		nextDay := curr.UnitDate.AddDate(0, 0, 1)
+		for nextRecord.UnitDate.After(nextDay) {
+			nullRecords = append(nullRecords, record.UnitRecord{nextDay, curr.UnitValue})
+			nextDay = nextDay.AddDate(0, 0, 1)
+		}
+	}
+
+	loader.data = append(loader.data, nullRecords...)
+	sort.Sort(loader.data)
+}
+
+func (loader *Loader) importRecords() {
+	for _, curr := range loader.data {
+		sqlStatement :=
+			"INSERT INTO " + loader.TableName + " VALUES ($1, $2)" +
+				" ON CONFLICT (vdate) DO NOTHING"
+		_, err := loader.conn.Exec(sqlStatement, curr.UnitDate, curr.UnitValue)
+		if err != nil {
+			fmt.Println(
+				"Failed to insert line, " +
+					curr.UnitDate.String() + "=" + strconv.FormatFloat(curr.UnitValue, 'f', 6, 64) +
+					". Error: " + err.Error())
+			continue
+		}
+	}
+}
+
+func isNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }
 
 // Connect Loader.Connect
@@ -53,7 +98,7 @@ func (loader *Loader) Create() {
 
 	createStmt, err := tx.Prepare(
 		"CREATE TABLE " + loader.TableName +
-			" (vdate date, value integer)")
+			" (vdate date PRIMARY KEY, value real)")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -82,8 +127,8 @@ func (loader *Loader) Load(filePath string) {
 
 	// Iterate through the records
 	for {
-		// Read each record from csv
-		record, err := r.Read()
+		// Read each row from csv
+		fields, err := r.Read()
 		if err == io.EOF {
 			break
 		}
@@ -91,26 +136,27 @@ func (loader *Loader) Load(filePath string) {
 			log.Fatal(err)
 		}
 
-		if len(record) < 2 {
-			fmt.Println("Skip line " + strings.Join(record, ","))
+		if len(fields) < 2 {
+			fmt.Println("Skip line " + strings.Join(fields, ","))
 			continue
 		}
 
-		unitValue, err := strconv.ParseFloat(strings.TrimSpace(record[1]), 64)
+		unitDate, err := time.Parse(loader.DateFormat, strings.TrimSpace(fields[0]))
 		if err != nil {
-			fmt.Println("Skip line, " + record[1] + " is not a numeric")
+			fmt.Println("Skip line, \"" + fields[0] + "\" is not a date")
 			continue
 		}
-		unitDate, err := time.Parse(loader.DateFormat, strings.TrimSpace(record[0]))
+
+		unitValue, err := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
 		if err != nil {
-			fmt.Println("Skip line, " + record[0] + " is not a date")
+			fmt.Println("Skip line, \"" + fields[1] + "\" is not a numeric")
 			continue
 		}
-		fmt.Println(unitDate.String() + "=" + strconv.FormatFloat(unitValue, 'f', 6, 64))
+
+		loader.data = append(loader.data, record.UnitRecord{unitDate, unitValue})
 	}
-}
 
-func isNumeric(s string) bool {
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
+	loader.fillGap()
+
+	loader.importRecords()
 }
