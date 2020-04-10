@@ -36,7 +36,7 @@ services:
   app:
     container_name: app
     build: .
-    command: ["tail", "-f", "/dev/null"]
+    command: bash -c "./dbloder && tail -f /dev/null"
     volumes:
       - .:/go/src/app
     depends_on:
@@ -57,9 +57,28 @@ services:
     command: ["npm", "start"]
     volumes:
       - ./superui:/app
-      - ./superui/app/node/modules:/app/node/modules
     ports:
       - "8000:3000"
+    stdin_open: true
+    tty: true
+    depends_on:
+      - db
+      - api
+    links:
+      - db
+      - api
+    networks:
+      - superdata
+  api:
+    container_name: api
+    build:
+      context: ./apiserver
+      dockerfile: Dockerfile
+    command: ["npm", "start"]
+    volumes:
+      - ./apiserver/src:/app/src
+    ports:
+      - "8001:3001"
     stdin_open: true
     tty: true
     depends_on:
@@ -68,7 +87,6 @@ services:
       - db
     networks:
       - superdata
-
 networks:
   superdata:
     driver: bridge
